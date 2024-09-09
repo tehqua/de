@@ -1,69 +1,59 @@
-from selenium import webdriver
-from selenium.webdriver.edge.service import Service
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-from selenium.webdriver.edge.options import Options
+from selenium.common.exceptions import NoSuchElementException
 from time import sleep
 import random
 import csv
 
-# Path to msedgedriver.exe
-service = Service("C:\\Users\\PC\\Downloads\\DE\\msedgedriver.exe")
+driver = uc.Chrome()
 
-# Set up headless option if needed
-options = Options()
-# options.headless = True  # Uncomment to run in headless mode
-
-# Create Edge with Service
-driver = webdriver.Edge(service=service, options=options)
-
-# Open CSV file for writing
 with open('real_estate_data.csv', mode='w', newline='', encoding='utf-8') as file:
     writer = csv.writer(file)
-    writer.writerow(['Type', 'Price', 'Area', 'Place'])
+    writer.writerow(['Type', 'Price', 'Area', 'Place', 'Link'])
 
-    def login(username, password):
-        driver.get('https://batdongsan.com.vn/dang-nhap')
-        sleep(random.randint(5, 10))
-        username_field = driver.find_element(By.NAME, '0943123827')  # Update as necessary
-        password_field = driver.find_element(By.NAME, 'Bin041104')  # Update as necessary
-        username_field.send_keys(username)
-        password_field.send_keys(password)
-        password_field.submit()
-        sleep(random.randint(5, 10))
-
-    def url_chungcu():
-        driver.get('https://batdongsan.com.vn/ban-can-ho-chung-cu-ha-noi') 
-        sleep(random.randint(5, 15))
-
-    def url_nhadat():
-        driver.get('https://batdongsan.com.vn/ban-nha-dat-ha-noi') 
-        sleep(random.randint(5, 15))
+    def handle_cloudflare():
+        try:
+            checkbox = driver.find_element(By.ID, "challenge-form")
+            if checkbox:
+                checkbox.click()
+                sleep(random.randint(2, 5))  
+        except NoSuchElementException:
+            pass
 
     def get_data(property_type):
-        try:
-            prices = driver.find_elements(By.CSS_SELECTOR, ".re__card-config-price.js__card-config-item")
-            areas = driver.find_elements(By.CSS_SELECTOR, ".re__card-config-area.js__card-config-item")
-            places = driver.find_elements(By.CSS_SELECTOR, ".re__card-config-dot + span")
+        places = driver.find_elements(By.CSS_SELECTOR, ".re__card-location span:last-child")  
+        prices = driver.find_elements(By.CSS_SELECTOR, ".re__card-config-price.js__card-config-item")
+        areas = driver.find_elements(By.CSS_SELECTOR, ".re__card-config-area.js__card-config-item")
+        links = driver.find_elements(By.CSS_SELECTOR, "a.js__product-link-for-product-id")
 
-            if not prices or not areas or not places:
-                print(f"No data found for {property_type}")
-                return
+        if not prices or not areas or not places or not links:
+            print(f"No data found for {property_type}")
+            return
 
-            for price, area, place in zip(prices, areas, places):
-                writer.writerow([property_type, price.text, area.text, place.text])
-        except Exception as e:
-            print(f"Error occurred while fetching data: {e}")
+        for price, area, place, link in zip(prices, areas, places, links):
+            try:
+                parent_element = link.find_element(By.XPATH, "./ancestor::div[contains(@class, 're__listing-verified-similar-v2')]")
+                if parent_element:
+                    continue  
+            except NoSuchElementException:
+                pass  
 
-    # Log in
-    login('your_username', 'your_password')  # Replace with your credentials
+            writer.writerow([property_type, price.text, area.text, place.text, link.get_attribute('href')])
 
-    # Crawl data for apartment prices
-    url_nhadat()
-    get_data('Nhà đất')
+    def crawl_pages(base_url, property_type, max_pages=100):
+        for page in range(1, max_pages + 1):
+            page_url = f'{base_url}/p{page}' if page > 1 else base_url
+            driver.get(page_url)
+            sleep(random.randint(5, 10))
+            handle_cloudflare()
 
-    # Crawl data for house prices
-    url_chungcu()
-    get_data('Chung cư')
+            get_data(property_type)
 
-# Close the browser after scraping
+            print(f"Crawled page {page} for {property_type}")
+
+    crawl_pages('https://batdongsan.com.vn/ban-nha-dat-ha-noi', 'Nhà đất', max_pages=2)
+
+    crawl_pages('https://batdongsan.com.vn/ban-can-ho-chung-cu-ha-noi', 'Chung cư', max_pages=2)
+
+# Đóng trình duyệt sau khi crawl
 driver.quit()
